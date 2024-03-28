@@ -1,0 +1,171 @@
+---
+title: "Understanding MEs"
+author: "Jeanette Lyerly"
+date: "7/15/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Purpose
+
+This is the example for "Understanding Mega-environments with real world breeding data" as part of the Wheat CAP Genomic Selection Workshop, July 2023, Raleigh, NC. 
+
+In this markdown we will import some data and create an example biplot. 
+
+Our goals in this example are to:   
+- Import some data   
+- Check the data   
+- Create a biplot   
+- Calculate correlations among environments   
+- Decide if those correlations make sense with our biplot output   
+
+These data sets are based on data provided by Jean-Luc Jannink (downloaded from T3). Data are from a wheat yield QTL study from the University of Nebraska.   
+More about T3: https://wheat.triticeaetoolbox.org   
+
+## Background
+
+In this example we will begin with the output from Noah's field analysis. In that analysis he imported the clean data, checked for row and column effects, fit the best model, and calculated BLUEs for each location.
+
+Here we will take the BLUEs for those locations and create a biplot to visualize the relationship between the environments.
+
+## Load libraries
+
+We are going to use the tidyverse, gge, and GGEBiplots packages.        
+
+```{r}
+library(tidyverse)
+library(gge)
+library(GGEBiplots)
+library(here)
+```
+
+## Import data
+
+The input file with the BLUEs is in the data folder for our mega-environment analysis. We will import the data and check it.        
+
+```{r load data}
+
+mydata <- read_csv(file = here::here("data", "YLDQTL_allBLUEs.csv"), col_names = T)
+
+glimpse(mydata) #always a good idea to check the data after importing
+
+```
+
+In this file we have a variable for trait, a variable for location, the sample ID, and the phenotype data, or BLUEs.   
+
+### Get the yield data
+
+In this example we will look at the yield data. We will filter out the "Across Locations" values and focus on the individual environments for this year.   
+
+```{r, select data}
+
+mydata <- mydata %>%
+  filter(TRAIT %in% c("Yield"),  #filter for the yield trait
+         !is.na(BLUEs), #filter to remove missing data
+         !LOC %in% c("Across Locations")) #filter to remove Across Locations values 
+  
+```
+
+### Distributions for traits 
+
+Let's look at the distributions for the trait. A quick check of the data is rarely a bad idea.       
+
+```{r, distributions}
+
+ggplot(mydata, aes(x = BLUEs)) +
+  geom_histogram(binwidth = 1) + #make a histogram of the yield data
+  facet_wrap(vars(LOC)) + #wrap over locations
+  labs(title = "Yield BLUEs by Location", x = "Yield") #label the plot
+
+```
+
+This distribution looks like we expected.  
+
+### Analysis with gge package for yield
+
+We will use the gge package to create our model for yield.  
+The GGEBiplots package will take the model from gge as input.   
+
+```{r, model}
+
+moddat1 <- mydata  
+m1 <- gge(moddat1, BLUEs ~ ID + ID * LOC, scale=F, center=T)
+plot(m1)
+
+```
+
+In the scree plot the first couple of PCs should explain a large portion of the variation. Otherwise another technique is needed. Here the first PC accounts for a large portion of the variation.      
+
+### Use package GGEBiplots   
+
+We can use this package to make plots using the gge model from above. The GGEPlot function generates the GGE biplot as an object of class ’ggplot’ from a model produced by a call to either GGEModel or gge.   
+
+This package makes a number of different types of biplots. You can learn more about the package and the different types of plots here: https://cran.r-project.org/web/packages/GGEBiplots/GGEBiplots.pdf.   
+
+Type of biplot to produce (type argument in the function below)   
+1. Basic biplot.   
+2. Examine environment. See ExamineEnv   
+3. Examine genotype. See ExamineGen   
+4. Relationship among environments. See EnvRelationship    
+5. Compare two genotypes. See CompareGens   
+6. Which won where/what. See WhichWon   
+7. Discrimination vs. representativeness. See DiscRep   
+8. Ranking environments. See RankEnv   
+9. Mean vs. stability. See MeanStability   
+10. Ranking gentoypes See RankGen   
+
+For this example we will focus on the Relationship Among Environments - type 4.   
+
+We can create this plot, and also save it to a file.
+
+```{r, biplots, fig.height=6, fig.width=6}
+#relationship among environments - type 4
+gge_type4 <- GGEPlot(m1, type = 4)
+gge_type4
+
+#save this plot to a pdf file
+#call the pdf command to start the plot
+pdf(file = here::here("results", "YLDQTL_biplot_type4.pdf"),   
+    width = 6, # The width of the plot in inches
+    height = 6) # The height of the plot in inches
+gge_type4
+#run dev.off() to create the file
+dev.off()
+
+```
+
+The biplot can show us large patterns in the data set.    
+
+The length of the arrow represents the standard deviation of means within an environment and tells us about the strength of the contribution for that environment.   
+
+The angle tells us about the correlation among the environments. If the vectors are close together in the same direction then we expect those environments to be positively correlated. If the angle is 90 degrees, then the environments are not likely to be correlated. If the vectors form a large angle, more than 90 degrees, then the environments are negatively correlated.    
+
+In this example, the vectors for Lincoln and Clay Center are close together. The angles between Lincoln and Sydney and Clay Center and Sydney are larger than the angle between Lincoln and Clay Center. The vectors are still going in the same direction, and the larger angles are less than 90 degrees. 
+
+Therefore, looking at this plot we expect a positive correlation for yield between Lincoln and Clay Center, and for each of those to have a lower positive correlation with Sydney. Lincoln should have a slightly higher correlation with Sydney than Clay Center.   
+
+If we calculate the correlations among the environments, we can see that this is true.   
+
+```{r}
+cordat <- mydata %>% 
+  pivot_wider(., id_cols = ID, names_from = LOC, values_from = BLUEs) #restructure the data for the correlation function
+round(cor(cordat[,-1], use = "pairwise.complete.obs", method = "pearson"), digits = 2) #calculate the correlation and round the result to 2 decimal places
+
+```
+
+We have a positive correlation between Clay Center and Lincoln (0.65). Sydney has a lower positive correlation with the other locations, and it's slightly higher with Lincoln (0.49) than Clay Center (0.45).
+
+**Does this result make sense?**   
+
+Lincoln is in the eastern part of NE. Clay Center is about 1.5 hours west of Lincoln. Lincoln and Clay Center both have a humid continental climate with cold winters and hot, humid summers. Sidney is toward the western edge of NE with a semi-arid climate with hot summers, cold winters, and low rainfall. Based on the geography and climate, we might expect Sidney to be very different from Lincoln and Clay Center, so our data and results make sense.
+
+
+Session Info
+
+```{r}
+sessionInfo()
+```
+

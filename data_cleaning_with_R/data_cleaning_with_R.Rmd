@@ -1,0 +1,399 @@
+---
+title: "Data cleaning with R"
+author: "Jeanette Lyerly"
+date: "7/11/2023"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Purpose
+
+In this markdown we will import and clean some example data with R as part of the Wheat CAP Genomic Selection Workshop, July 2023, Raleigh, NC.  
+
+Our goals in this example are to:   
+- Import some data   
+- Look at the data and calculate some summaries   
+- Identify issues with the data and do any cleaning   
+- Export a new data file for downstream analysis   
+
+These data sets are based on data provided by Jean-Luc Jannink (downloaded from T3). 
+
+## Data cleaning
+
+What is data cleaning? When we talk about data cleaning we want to be sure our data is 1) correct, 2) consistent, and 3) useable. Don't underestimate the importance of data cleaning, or the time it will take to do this. 
+
+**garbage in = garbage out**
+
+Common issues that we run into in our data cleaning:   
+Special characters    
+Inaccuracies/data entry errors   
+White spaces   
+Zeros instead of null values   
+
+Keep tidy data principles in mind:    
+- Each variable must have its own column   
+- Each observation must have its own row   
+- Each value must have its own cell   
+
+## Background
+
+Our data scenario begins with some data from breeder(s). It's common (for us) to receive data in a spreadsheet from each person/location.   
+In our example we have data coming in from four locations: Ithaca, Sydney, Lincoln, and Clay Center. Each location has a data sheet.   
+At the end we want to have one combined data set that we can use for downstream analysis.   
+
+## Load libraries
+
+We are going to use the tidyverse and a couple of functions from the janitor package to work with this data.   
+
+```{r load packages}
+library(tidyverse)
+library(janitor)
+library(here)
+
+```
+
+## Import data
+
+As data files have been sent from the breeder(s), we have stored them in a folder called "data_raw". At this point we haven't really looked at these, just put them in a folder as they arrived. We did use descriptive names so we know what the files are.      
+
+Let's import some data.  
+We will create a list of the files we have in the folder, then import them into individual data frames.   
+
+```{r load data}
+
+#make a list of the files
+file_list <- list.files(path = here::here("data_raw"), pattern='*.csv')
+file_list
+
+#since we only have a few files, and we're assuming we haven't really looked at them, let's read them in separately
+df1 <- read_csv(file = here::here("data_raw", file_list[1]), col_names = T)
+df2 <- read_csv(file = here::here("data_raw", file_list[2]), col_names = T)
+df3 <- read_csv(file = here::here("data_raw", file_list[3]), col_names = T)
+df4 <- read_csv(file = here::here("data_raw", file_list[4]), col_names = T)
+
+
+```
+
+Looking at the file list we see four files, one per location.    
+
+## Look over our imported data
+
+Now we have four data frames, each with data from a location. Let's take a look at them.
+
+```{r}
+glimpse(df1)
+glimpse(df2)
+glimpse(df3)
+glimpse(df4)
+```
+
+We have a number of variables with different types in here. Some are character and some are numeric. 
+
+The first location has phenotype data for yield and height. The other locations have data for yield, test weight, and height.
+
+One of the common issues we discussed with data cleaning was differences in trait names or abbreviations.  
+Are the column headers in all the data frames the same?   
+
+```{r compare columns}
+#use the function from the janitor package to compare the columns
+compare_cols <- compare_df_cols(df1, df2, df3, df4) %>%
+  arrange(column_name) 
+compare_cols
+
+#look at the mismatched ones
+compare_df_cols(df1, df2, df3, df4, return = "mismatch", bind_method = "rbind")
+
+```
+
+We can see some differences in our column names right away. It looks like the data sheet for location three is a bit different from the others.  
+YR and YEAR    
+ID and VAR   
+TW and TWT   
+YLD and YIELD   
+HT and PLTHT   
+
+Adjust these headers and create a data set.   
+When using the rename function the syntax is new name = old name.      
+
+```{r bind data}
+#make a list of our data frames
+df_list <- list(df1, df2, df3, df4) 
+
+#bind them into a raw data set, renaming the columns as needed
+#rename is new name = old name
+raw_data <- map(df_list, ~ rename(.x, any_of(c("YR" = "YEAR", "ID" = "VAR", "TW" = "TWT", "YLD" = "YIELD", "HT" = "PLTHT")))) %>% 
+  bind_rows()
+
+#check the data - is this what you expected?
+glimpse(raw_data)
+
+```
+
+This looks a bit better. We have only one YEAR, TW, YLD, and HT. We've also resolved the ID and VAR column names and all our samples have ID. 
+
+```{r}
+#look at the data
+view(raw_data)
+
+```
+
+If we look at the data we can see variables for year, the study name and some descriptive notes, information about the location, the ID of the sample, and our phenotype data.  
+We've got phenotype data for yield, test weight, and plant height.   
+
+Next let's check the number of samples in each location and rep.   
+
+**A side note about pipes**
+If you are not familiar with the tidyverse packages, you may not be familiar with the pipe. The pipe, %>%, comes from the magrittr package by Stefan Milton Bache. Packages in the tidyverse load %>% for you automatically. For a more detailed explanation of pipes and how they work see https://r4ds.had.co.nz/pipes.html. 
+If you are reading the code aloud, the pipe can be read as "and then".  
+
+In the code below we are asking to take the raw data, and then group it by location and rep, and then count the number of samples.
+
+```{r}
+#check the number of lines in each location and rep
+raw_data %>% 
+  group_by(LOC, REP) %>% 
+  count()
+
+```
+
+We have four locations, each with 2 reps.   
+For the location variable, note that we have more than one thing in a cell.   
+
+There are some notes from the breeder in the DESCRIPTION field.   
+
+```{r}
+#what is in the notes? get the unique values
+raw_data %>% 
+  select(DESCRIPTION) %>%
+  unique(.)
+
+```
+
+When we read over this we can see that we have a note from the program that there was a mistake and some data should be discarded. 
+
+Next we can run a quick count of the sample names - here this is the ID variable. Based on our locations and reps we expect to see each sample eight times.    
+
+```{r}
+#run a count of the sample names
+id_counts <- raw_data %>%
+  group_by(ID) %>%
+  count(name = "sample_count") %>%
+  arrange(desc(sample_count))
+head(id_counts) #show the top of the id_counts data frame
+tail(id_counts) #show the bottom of the id_counts data frame
+```
+
+These samples are present 7-8 times, which makes sense.   
+
+Based on our initial assessment we have some cleaning to do. 
+
+## Data processing
+
+Let's tackle these issues from our data set.
+
+1. Fix the location to have one thing in a cell.   
+2. Remove the data that the breeder said to discard.   
+
+```{r begin processing}
+#start a new data frame with our processed data
+mydata <- raw_data
+
+dim(mydata) #1738 rows and 17 columns
+
+#for location we have more than one thing in a cell
+#separate into variables
+mydata <- mydata %>%
+  separate(LOC, into = c("LOC", "STATE"), sep = ",")
+
+#filter the data to remove anything with the text note "Data discarded"
+#the ! = not, so here we are asking to filter for data where "Data discarded" is NOT in the DESCRIPTION
+mydata <- mydata %>%
+  filter(!str_detect(DESCRIPTION, "Data discarded"))
+
+dim(mydata) #1320 rows and 18 columns
+
+#look at what we have now
+mydata %>% 
+  group_by(LOC, REP) %>% 
+  count()
+
+```
+
+We've dropped one location by removing the "discard" data. Now we have three locations with two reps per location, and 220 samples per rep.        
+
+#### Create some summaries and visuals for the data 
+
+We will select the variables that we are interested in and pivot to long format data.   
+Then we will calculate the mean and sd for each trait in each location.   
+
+```{r}
+
+#select some columns and pivot the data
+mydata <- mydata %>%
+  select(YR, PROGRAM, LOC, STATE, ID, REP, BLOCK, ROW, COL, PLOT, YLD, TW, HT) %>%
+  pivot_longer(., cols = c("YLD", "TW", "HT"), names_to = "Trait", values_to = "Measurement")
+
+#calculate the means for the traits by location
+mydata %>%
+  group_by(LOC, Trait) %>%
+  summarize(mean = mean(Measurement), sd = sd(Measurement)) %>%
+  arrange(LOC, Trait)
+
+```
+
+One location is missing test weight data, which we already knew from looking at our data before.  
+
+Looks like something's up with our height data. The mean height for Lincoln is much lower than the mean height for Clay Center or Sidney.     
+
+**Look at the distributions of the data.**   
+
+This can tell us about general trends and help us see any obvious problems.
+
+Distribution for yield - create a histogram for all the data, and then for each location.   
+
+```{r}
+#histogram with all the data over locations
+ggplot(mydata %>% filter(Trait == "YLD"), aes(x = Measurement)) +
+  geom_histogram() +
+  labs(title = "All Locs - Yield")
+
+#facet over locations
+ggplot(mydata %>% filter(Trait == "YLD"), aes(x = Measurement)) +
+  geom_histogram() +
+  facet_wrap(vars(LOC)) +
+  labs(title = "Locs - Yield")
+
+```
+
+This looks pretty good for yield.
+
+Distribution for test weight - same thing.   
+
+```{r}
+#histogram with all the data over locations
+#if we run this without dropping the missing location data we get a warning
+#we can add to our filter statement to drop the missing values
+ggplot(mydata %>% filter(Trait == "TW", !is.na(Measurement)), aes(x = Measurement)) +
+  geom_histogram() +
+  labs(title = "All Locs - TestWt")
+
+#facet over locations
+ggplot(mydata %>% filter(Trait == "TW", !is.na(Measurement)), aes(x = Measurement)) +
+  geom_histogram() +
+  facet_wrap(vars(LOC)) +
+  labs(title = "Locs - TestWt")
+
+
+```
+
+There are a couple of zero values in here for the Lincoln location. Zero may sneak in as missing data. Investigate these IDs to see what is going on here. Sometimes zero is meaningful.
+
+First, let's get the low test weight data and see which samples these are.   
+
+```{r}
+
+low_tw <- mydata %>%
+  filter(Trait == "TW" & Measurement < 10) %>%
+  select(LOC, ID, Trait, Measurement)
+low_tw
+#we have three zero values
+
+```
+
+We have three IDs with 0 for test weight in the Lincoln location.   
+
+```{r}
+#is there data for these IDs for the other variables?
+low_tw <- mydata %>% 
+  filter(LOC %in% "Lincoln" & ID %in% low_tw$ID) %>%
+  select(LOC, REP, ID, Trait, Measurement) %>%
+  arrange(Trait, ID)
+low_tw
+#there is yield and height data for these low tw IDs
+
+```
+
+If we get all the data for these IDs in Lincoln we can see that there is yield and height data. It doesn't make sense to have a value for yield with 0 test weight, so it's likely that 0 has been used in this location as the code for missing data (always a good idea to double check).    
+
+```{r}
+#replace these 0 values with missing data
+mydata <- mydata %>% 
+  mutate(Measurement = ifelse(Trait %in% c("TW") & Measurement == 0, NA, Measurement)) #replace with NA
+
+#recheck
+ggplot(mydata %>% filter(Trait == "TW", !is.na(Measurement)), aes(x = Measurement)) +
+  geom_histogram() +
+  facet_wrap(vars(LOC)) +
+  labs(title = "Locs - TestWt")
+
+```
+
+That looks better. The zero values are gone and overall this looks ok.   
+
+Distribution for height.
+
+```{r}
+#histogram with all the data over locations
+ggplot(mydata %>% filter(Trait == "HT"), aes(x = Measurement)) +
+  geom_histogram() +
+  labs(title = "All Locs - Height")
+#something is up here
+
+#facet over locations
+ggplot(mydata %>% filter(Trait == "HT"), aes(x = Measurement)) +
+  geom_histogram() +
+  facet_wrap(vars(LOC)) +
+  labs(title = "Locs - Height")
+
+```
+
+The distribution for height is odd. When we plot the data for each location we can see that one of the locations has height data reported on a different scale. 
+
+Clay Center and Sidney have height reported in centimeters, but Lincoln has height reported in inches. We will convert this data to be on the same scale as the other locations.   
+
+```{r}
+#convert the height data for Lincoln
+mydata <- mydata %>%
+  mutate(Measurement = ifelse(Trait %in% c("HT") & LOC %in% c("Lincoln"), Measurement*2.54, Measurement))
+
+#recheck
+ggplot(mydata %>% filter(Trait == "HT"), aes(x = Measurement)) +
+  geom_histogram() +
+  facet_wrap(vars(LOC)) +
+  labs(title = "Locs - Height")
+
+```
+
+That looks correct.
+
+## Export data
+
+At this point we have a long format data set where we've looked at the distributions for each of our phenotype traits, corrected for odd values, and adjusted values that were not on the same scale.
+
+We can export this data in the long format for downstream processing.  
+We can also convert back to the wide format if that is needed for reporting.  
+
+```{r save files}
+#save the file
+write.csv(mydata, file = here::here("data_clean", "YLDQTLVAL_clean.csv"), row.names = F)
+
+#select report columns, pivot to wide format, and arrange by rep and ID
+mydata_report <- mydata %>%
+  select(YR, PROGRAM, LOC, STATE, ID, REP, Trait, Measurement) %>%
+  arrange(Trait, LOC) %>%
+  pivot_wider(., names_from = c(Trait, LOC), values_from = Measurement) %>%
+  arrange(REP, ID)
+write.csv(mydata_report, file = here::here("data_clean", "YLDQTLVAL_report.csv"), row.names = F)
+
+
+```
+
+```{r session}
+sessionInfo()
+```
+
